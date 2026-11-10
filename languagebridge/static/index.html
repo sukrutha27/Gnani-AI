@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LanguageBridge – translate any phone call</title>
+<style>
+  :root { --bg:#0f1115; --card:#191c22; --line:#2a2f38; --text:#eef0f3; --muted:#9aa3b2;
+          --green:#22c55e; --red:#ef4444; --accent:#7c6cff; --amber:#f5b041; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Noto Sans Telugu","Noto Sans Tamil",sans-serif;
+         background:var(--bg); color:var(--text); display:flex; justify-content:center; min-height:100vh; }
+  .wrap { width:100%; max-width:560px; padding:20px; display:flex; flex-direction:column; gap:14px; }
+  h1 { font-size:24px; margin:6px 0 0; } h1 span { color:var(--accent); }
+  .sub { color:var(--muted); font-size:14px; margin:0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, select { width:100%; padding:12px; border-radius:10px; border:1px solid var(--line);
+                  background:#0f1115; color:var(--text); font-size:16px; }
+  .row { display:flex; gap:10px; } .row > * { flex:1; }
+  button { border:0; border-radius:12px; padding:14px; font-size:16px; font-weight:600; cursor:pointer;
+           width:100%; color:white; background:var(--green); margin-top:14px; }
+  button.red { background:var(--red); }
+  .hidden { display:none !important; }
+  .legs { display:flex; gap:10px; }
+  .leg { flex:1; text-align:center; padding:12px; border-radius:12px; background:#12151b; border:1px solid var(--line); }
+  .leg .n { font-weight:700; font-size:15px; } .leg .s { font-size:13px; color:var(--muted); margin-top:4px; }
+  .leg.on { border-color:var(--green); } .leg.talk { border-color:var(--amber); }
+  .chat { display:flex; flex-direction:column; gap:10px; max-height:55vh; overflow-y:auto; margin-top:12px; }
+  .msg { border-radius:14px; padding:10px 12px; line-height:1.4; max-width:92%; }
+  .msg.them { background:#2a2414; align-self:flex-start; }
+  .msg.you { background:#231f3d; align-self:flex-end; }
+  .msg .big { font-size:17px; } .msg .small { font-size:13px; color:var(--muted); margin-top:4px; }
+  .msg .meta { font-size:11px; color:var(--muted); margin-top:6px; }
+  .err { color:#fca5a5; font-size:13px; }
+  .steps { margin:0; padding-left:20px; color:var(--muted); font-size:14px; line-height:1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <h1>Language<span>Bridge</span> 📞</h1>
+    <p class="sub">Translate a normal phone call. No app for anyone.</p>
+  </div>
+
+  <div id="setup" class="card">
+    <label>Your phone number</label>
+    <input id="myNum" placeholder="+91 98765 43210" inputmode="tel">
+    <label>Language you speak</label>
+    <select id="myLang"></select>
+    <label>Their phone number</label>
+    <input id="theirNum" placeholder="+91 91234 56789" inputmode="tel">
+    <label>Their language</label>
+    <select id="theirLang"><option value="auto">Detect automatically</option></select>
+    <button id="go">📞 Connect call</button>
+    <p id="err" class="err"></p>
+    <ol class="steps">
+      <li>Both phones ring with a normal call. Answer it.</li>
+      <li>On a trial account, press any key when asked.</li>
+      <li>After the beep, just talk. Pause when you finish a sentence.</li>
+    </ol>
+    <p id="mockNote" class="sub hidden">⚙️ Mock mode: no real calls are made.</p>
+  </div>
+
+  <div id="live" class="card hidden">
+    <div class="legs">
+      <div class="leg" id="leg-you"><div class="n">You</div><div class="s" id="s-you">Ringing…</div></div>
+      <div class="leg" id="leg-them"><div class="n">Them</div><div class="s" id="s-them">Ringing…</div></div>
+    </div>
+    <div class="chat" id="chat"></div>
+    <button id="end" class="red">End call</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let sid, langs;
+(async () => {
+  const cfg = await (await fetch("/config")).json(); langs = cfg.languages;
+  for (const [c, n] of Object.entries(langs)) {
+    $("myLang").add(new Option(n, c, c === "te-IN", c === "te-IN"));
+    $("theirLang").add(new Option(n, c));
+  }
+  if (cfg.mock) $("mockNote").classList.remove("hidden");
+})();
+
+const norm = n => { n = n.replace(/[^\d+]/g, ""); if (!n.startsWith("+")) n = "+91" + n.replace(/^0/, ""); return n; };
+
+$("go").onclick = async () => {
+  $("err").textContent = "";
+  const body = { my_number: norm($("myNum").value), my_lang: $("myLang").value,
+                 their_number: norm($("theirNum").value), their_lang: $("theirLang").value };
+  if (body.my_number.length < 12 || body.their_number.length < 12) { $("err").textContent = "Enter both phone numbers"; return; }
+  $("go").disabled = true; $("go").textContent = "Calling…";
+  const r = await (await fetch("/connect", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) })).json();
+  $("go").disabled = false; $("go").textContent = "📞 Connect call";
+  if (!r.ok) { $("err").textContent = r.error; return; }
+  sid = r.session;
+  $("setup").classList.add("hidden"); $("live").classList.remove("hidden"); $("chat").innerHTML = "";
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/live/${sid}`);
+  ws.onmessage = e => onEvent(JSON.parse(e.data));
+};
+
+function setLeg(who, text, cls) {
+  $("s-" + who).textContent = text;
+  $("leg-" + who).className = "leg " + (cls || "");
+}
+
+function onEvent(m) {
+  if (m.type === "status") {
+    if (m.state === "answered") setLeg(m.who, "Answered", "on");
+    if (m.state === "hung up") setLeg(m.who, "Hung up", "");
+    if (m.state === "connected") { setLeg("you", "Live", "on"); setLeg("them", "Live", "on"); }
+  }
+  if (m.type === "speaking") setLeg(m.who, "Speaking…", "talk");
+  if (m.type === "caption") {
+    setLeg(m.who, "Live", "on");
+    if (m.who === "them") { $("s-them").textContent = `Live · speaks ${m.src}`; }
+    const d = document.createElement("div"); d.className = "msg " + m.who;
+    d.innerHTML = '<div class="big"></div><div class="small"></div><div class="meta"></div>';
+    d.children[0].textContent = m.who === "them" ? `${m.src}: ${m.original}` : `You (${m.src}): ${m.original}`;
+    d.children[1].textContent = `→ ${m.tgt}: ${m.translated}`;
+    const t = m.timing;
+    d.children[2].textContent = `⏱ ${t.total}s  (speech-to-text ${t.stt}s · translate ${t.translate}s · voice ${t.tts}s)`;
+    $("chat").appendChild(d); $("chat").scrollTop = 1e9;
+  }
+  if (m.type === "error") {
+    const d = document.createElement("div"); d.className = "err"; d.textContent = m.text; $("chat").appendChild(d);
+  }
+}
+
+$("end").onclick = async () => {
+  if (sid) await fetch("/hangup/" + sid, { method:"POST" });
+  $("live").classList.add("hidden"); $("setup").classList.remove("hidden");
+};
+</script>
+</body>
+</html>
